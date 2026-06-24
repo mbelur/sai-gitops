@@ -1,0 +1,388 @@
+{
+  "apiVersion": "fleet.cattle.io/v1alpha1",
+  "kind": "HelmOp",
+  "metadata": {
+    "name": "suse-ai-aiq2-web-aiq2-web-system-local",
+    "namespace": "fleet-local"
+  },
+  "spec": {
+    "defaultNamespace": "aiq2-web-system",
+    "helm": {
+      "chart": "aiq2-web",
+      "version": "2.1.0",
+      "repo": "https://helm.ngc.nvidia.com/nvidia/blueprint",
+      "releaseName": "aiq2-web",
+      "values": {
+        "aiq": {
+          "appname": "aiq",
+          "apps": {
+            "backend": {
+              "autoscaling": {
+                "enabled": false,
+                "maxReplicas": 3,
+                "minReplicas": 1,
+                "targetCPUUtilizationPercentage": 80,
+                "targetMemoryUtilizationPercentage": 80
+              },
+              "enabled": true,
+              "env": {
+                "AIQ_CHECKPOINT_DB": "postgresql://$(DB_USER_NAME):$(DB_USER_PASSWORD)@aiq-postgres:5432/aiq_jobs",
+                "AIQ_CHROMA_DIR": "/app/data/chroma",
+                "AIQ_SUMMARY_DB": "postgresql+asyncpg://$(DB_USER_NAME):$(DB_USER_PASSWORD)@aiq-postgres:5432/aiq_jobs",
+                "APP_ENV": "production",
+                "COLLECTION_NAME": "default_collection",
+                "CONFIG_FILE": "configs/config_web_default_llamaindex.yml",
+                "DASK_NTHREADS": "4",
+                "DASK_NWORKERS": "1",
+                "LOG_LEVEL": "INFO",
+                "MODE": "web",
+                "NAT_JOB_STORE_DB_URL": "postgresql+asyncpg://$(DB_USER_NAME):$(DB_USER_PASSWORD)@aiq-postgres:5432/aiq_jobs",
+                "RAG_INGEST_URL": "http://rag-ingest:8080",
+                "RAG_SERVER_URL": "http://rag-server:8080"
+              },
+              "healthCheck": {
+                "enabled": true,
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8000
+                  },
+                  "initialDelaySeconds": 30,
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
+                "readinessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8000
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 10,
+                  "timeoutSeconds": 5
+                }
+              },
+              "image": {
+                "pullPolicy": "IfNotPresent",
+                "repository": "nvcr.io/nvidia/blueprint/aiq-agent",
+                "tag": "2.1.0"
+              },
+              "imagePullSecrets": [],
+              "ingress": {
+                "annotations": {},
+                "enabled": false
+              },
+              "initContainers": [
+                {
+                  "command": [
+                    "sh",
+                    "-c",
+                    "echo \"Waiting for postgres...\"\nuntil pg_isready -h aiq-postgres -U $(DB_USER_NAME) -d aiq_jobs; do\n  sleep 2\ndone\necho \"Running init script...\"\npsql -h aiq-postgres -U $(DB_USER_NAME) -d aiq_jobs -v db_user=$(DB_USER_NAME) -f /db-init/init.sql\n"
+                  ],
+                  "env": [
+                    {
+                      "name": "PGPASSWORD",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "DB_USER_PASSWORD",
+                          "name": "aiq-credentials"
+                        }
+                      }
+                    },
+                    {
+                      "name": "DB_USER_NAME",
+                      "valueFrom": {
+                        "secretKeyRef": {
+                          "key": "DB_USER_NAME",
+                          "name": "aiq-credentials"
+                        }
+                      }
+                    }
+                  ],
+                  "image": "bitnami/postgresql:latest",
+                  "name": "db-init",
+                  "volumeMounts": [
+                    {
+                      "mountPath": "/db-init",
+                      "name": "postgres-init",
+                      "readOnly": true
+                    }
+                  ]
+                }
+              ],
+              "labels": {
+                "component": "backend"
+              },
+              "podSecurityContext": null,
+              "port": 8000,
+              "replicas": 1,
+              "resources": {
+                "limits": {
+                  "cpu": "2",
+                  "memory": "4Gi"
+                },
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "1Gi"
+                }
+              },
+              "route": {
+                "annotations": {},
+                "enabled": false,
+                "host": "localhost",
+                "tls": {
+                  "insecureEdgeTerminationPolicy": "Redirect",
+                  "termination": "edge"
+                }
+              },
+              "service": {
+                "port": 8000,
+                "targetPort": 8000,
+                "type": "ClusterIP"
+              },
+              "stdin": false,
+              "tty": false,
+              "volumes": [
+                {
+                  "configMap": {
+                    "name": "aiq-postgres-init"
+                  },
+                  "name": "postgres-init"
+                }
+              ]
+            },
+            "frontend": {
+              "autoscaling": {
+                "enabled": false,
+                "maxReplicas": 3,
+                "minReplicas": 1,
+                "targetCPUUtilizationPercentage": 80
+              },
+              "enabled": true,
+              "env": {
+                "BACKEND_URL": "http://aiq-backend:8000",
+                "FILE_EXPIRATION_CHECK_INTERVAL_HOURS": "0",
+                "FILE_UPLOAD_ACCEPTED_TYPES": ".pdf,.docx,.txt,.md",
+                "FILE_UPLOAD_MAX_FILE_COUNT": "10",
+                "FILE_UPLOAD_MAX_SIZE_MB": "100",
+                "NEXT_PUBLIC_DATADOG_ENABLED": "false",
+                "NODE_ENV": "production",
+                "REQUIRE_AUTH": "false"
+              },
+              "healthCheck": {
+                "enabled": true,
+                "livenessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/",
+                    "port": 3000
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 15,
+                  "timeoutSeconds": 5
+                },
+                "path": "/",
+                "readinessProbe": {
+                  "failureThreshold": 3,
+                  "httpGet": {
+                    "path": "/",
+                    "port": 3000
+                  },
+                  "initialDelaySeconds": 5,
+                  "periodSeconds": 10,
+                  "timeoutSeconds": 3
+                },
+                "startupProbe": {
+                  "failureThreshold": 30,
+                  "httpGet": {
+                    "path": "/",
+                    "port": 3000
+                  },
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 3
+                }
+              },
+              "image": {
+                "pullPolicy": "IfNotPresent",
+                "repository": "nvcr.io/nvidia/blueprint/aiq-frontend",
+                "tag": "2.1.0"
+              },
+              "imagePullSecrets": [],
+              "ingress": {
+                "annotations": {},
+                "className": "nginx",
+                "enabled": true
+              },
+              "labels": {
+                "component": "frontend"
+              },
+              "podSecurityContext": null,
+              "port": 3000,
+              "replicas": 1,
+              "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "2Gi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "256Mi"
+                }
+              },
+              "route": {
+                "annotations": {},
+                "enabled": false,
+                "host": "localhost",
+                "tls": {
+                  "insecureEdgeTerminationPolicy": "Redirect",
+                  "termination": "edge"
+                }
+              },
+              "service": {
+                "port": 3000,
+                "targetPort": 3000,
+                "type": "ClusterIP"
+              }
+            },
+            "postgres": {
+              "enabled": true,
+              "env": {
+                "POSTGRESQL_MAX_CONNECTIONS": "200",
+                "POSTGRES_DB": "aiq_jobs"
+              },
+              "healthCheck": {
+                "enabled": true,
+                "livenessProbe": {
+                  "exec": {
+                    "command": [
+                      "sh",
+                      "-c",
+                      "pg_isready -U $POSTGRES_USER -d aiq_jobs"
+                    ]
+                  },
+                  "failureThreshold": 5,
+                  "initialDelaySeconds": 10,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 5
+                },
+                "readinessProbe": {
+                  "exec": {
+                    "command": [
+                      "sh",
+                      "-c",
+                      "pg_isready -U $POSTGRES_USER -d aiq_jobs"
+                    ]
+                  },
+                  "failureThreshold": 5,
+                  "initialDelaySeconds": 5,
+                  "periodSeconds": 5,
+                  "timeoutSeconds": 5
+                }
+              },
+              "image": {
+                "pullPolicy": "IfNotPresent",
+                "repository": "bitnami/postgresql",
+                "tag": "latest"
+              },
+              "imagePullSecrets": [],
+              "labels": {
+                "component": "postgres"
+              },
+              "persistence": [
+                {
+                  "accessModes": [
+                    "ReadWriteOnce"
+                  ],
+                  "name": "aiq-postgres-data",
+                  "size": "10Gi"
+                }
+              ],
+              "podSecurityContext": null,
+              "ports": [
+                {
+                  "containerPort": 5432,
+                  "name": "postgres",
+                  "protocol": "TCP"
+                }
+              ],
+              "replicas": 1,
+              "secretEnv": {
+                "POSTGRES_PASSWORD": "DB_USER_PASSWORD",
+                "POSTGRES_USER": "DB_USER_NAME"
+              },
+              "service": {
+                "ports": [
+                  {
+                    "name": "postgres",
+                    "port": 5432,
+                    "targetPort": 5432
+                  }
+                ],
+                "type": "ClusterIP"
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/var/lib/postgresql/data",
+                  "name": "postgres-data"
+                }
+              ],
+              "volumes": [
+                {
+                  "name": "postgres-data",
+                  "persistentVolumeClaim": {
+                    "claimName": "aiq-postgres-data"
+                  }
+                }
+              ]
+            }
+          },
+          "bootstrap": {
+            "createPostgresInitConfigMap": true
+          },
+          "project": {
+            "blueprint_type": "web",
+            "cloud_provider": "kind",
+            "cluster_name": "in-cluster",
+            "deploymentEnv": "",
+            "deploymentTarget": "kubernetes",
+            "name": "aiq",
+            "orientation": "external",
+            "primary_owner": "developer@localhost",
+            "profile": "web",
+            "secondary_owner": "developer@localhost",
+            "services": [
+              "backend",
+              "frontend",
+              "postgres",
+              "rag"
+            ]
+          },
+          "secretEnvAsEnv": false,
+          "sharedSecrets": {
+            "autoMount": true,
+            "dataFrom": [],
+            "enabled": true,
+            "refreshInterval": "5m"
+          }
+        },
+        "imagePullSecret": {
+          "create": false,
+          "name": "ngc-secret"
+        },
+        "ngcApiSecret": {
+          "create": false,
+          "name": "ngc-api"
+        }
+      },
+      "disablePreProcess": true,
+      "takeOwnership": true
+    },
+    "targets": [
+      {
+        "clusterName": "local"
+      }
+    ]
+  }
+}
